@@ -1,8 +1,9 @@
 # DSH 0.2.0-rc.2 — Exact API contract reference for plugin authoring
 
-Source of truth: the installed archive `D:\software\DeepSeek Harness\resources\app.asar`.
+Source of truth: the installed archive `<DSH install>\resources\app.asar`, e.g.
+`D:\software\DeepSeek Harness\resources\app.asar` on the machine this was written on.
 All paths below are **asar-internal** paths, i.e. relative to the DSH checkout root
-`D:\software\DeepSeek Harness\resources\app.asar\dsh\`.
+`<DSH install>\resources\app.asar\dsh\`.
 
 **Method note (important).** The archive ships **no `.d.ts` files at all** (verified: zero
 `*.d.ts` entries in the whole 121 MB archive). Compiled `lib/index.js` / `lib/client.js` are
