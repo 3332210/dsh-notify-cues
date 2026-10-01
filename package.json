@@ -1,0 +1,37 @@
+{
+  "name": "dsh-notify-cues",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DSH Windows 通知插件：按 turn/end 的真实结束原因区分「完成 / 中断 / 出错 / 额度耗尽 / 被阻塞 / 需要操作」，各类独立提示音与 toast，任务栏闪烁可开关，附图形化设置页。",
+  "license": "MIT",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/notify.ps1",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  }
+}

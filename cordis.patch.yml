@@ -1,0 +1,14 @@
+# dsh-notify-cues — bundle patch.
+#
+# This is a top-level patch list. When the package is installed as a profile
+# dependency the profile picks it up through `dsh.bundle.patch`; for local
+# development copy the `- insert:` block below verbatim into
+# $DSH_HOME/profiles/<name>/cordis.patch.yml (also a top-level list, so the
+# indentation carries over unchanged).
+- insert:
+    - id: dsh-notify-cues
+      name: 'dsh-notify-cues'
+      # `subprocess` runs notify.ps1, `webServer` serves the settings API.
+      inject: ['subprocess', 'webServer']
+      config:
+        notifications: true

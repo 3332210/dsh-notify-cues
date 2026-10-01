@@ -1,0 +1,31 @@
+# dsh-notify-cues — local development overlay.
+#
+# Mount a checkout directly, with no packaging and no `dsh plugin add`:
+#
+#   dsh --profile <name> --patch /path/to/dev.patch.yml web
+#
+# Both halves hot-reload from here, so iterating on lib/index.js and
+# lib/client.js needs no restart.
+#
+# TWO things to change before this works:
+#
+#  1. `name` MUST be a file:// URL, not a filesystem path. The Cordis loader
+#     hands the value to a bare `import(name)`, and an absolute Windows path is
+#     rejected with ERR_UNSUPPORTED_ESM_URL_SCHEME. Generate the correct value
+#     from the checkout root:
+#
+#       node -e "console.log(require('node:url').pathToFileURL(
+#         require('node:path').resolve('lib/index.js')).href)"
+#
+#     Non-ASCII path segments come out percent-encoded, which is required.
+#
+#  2. The profile must be one the CLI can boot. A profile owned by the desktop
+#     application is refused with:
+#       error: profile "X" is managed exclusively by the Electron application
+#     For that case, install into the profile instead — see README.
+- insert:
+    - id: dsh-notify-cues
+      name: 'file:///REPLACE/WITH/path/to/dsh-notify-cues/lib/index.js'
+      inject: ['subprocess', 'webServer']
+      config:
+        notifications: true

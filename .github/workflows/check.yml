@@ -1,0 +1,54 @@
+name: check
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    # The plugin targets Windows: notify.ps1 drives WinRT toasts and the
+    # taskbar, and several checks read the local DeepSeek Harness install.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Pure-logic suite: no harness, no Windows APIs, no spawn.
+      - name: Unit tests
+        run: node test/run.mjs
+
+      # Static checks that do not need a harness install.
+      - name: Browser bundle contract
+        run: node test/client-contract.mjs lib/client.js
+
+      - name: Patch file structure
+        run: node test/patch-shape.mjs cordis.patch.yml dev.patch.yml
+
+      - name: PowerShell syntax
+        shell: pwsh
+        run: |
+          $errors = $null
+          $tokens = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            "$PWD/lib/notify.ps1", [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error "line $($_.Extent.StartLineNumber): $($_.Message)" }
+            exit 1
+          }
+          Write-Host 'lib/notify.ps1 parses cleanly'
+
+      # Harness-dependent checks. They report "skipped" rather than failing when
+      # no DeepSeek Harness install is present on the runner, so a fork builds
+      # green; on a machine with the harness they verify the real contracts.
+      - name: Manifest vs installed harness
+        run: node test/manifest.mjs package.json
+
+      - name: Patch mount specifier loads
+        run: node test/patch-loadable.mjs dev.patch.yml
+
+      - name: Profile patch shape
+        run: node test/sim-append.mjs

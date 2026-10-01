@@ -1,0 +1,14 @@
+# Editor and OS noise
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.log
+
+# A filled-in dev overlay is machine-specific; keep the template tracked but
+# never commit a real path by accident.
+dev.local.patch.yml
+*.local.yml
+
+# Node
+node_modules/
