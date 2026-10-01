@@ -1,26 +1,26 @@
 # dsh-notify-cues
 
-**Windows notifications for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) that tell you *why* a turn ended** — finished, interrupted, failed, out of budget — each with its own chime, instead of reporting every stop as "task complete".
+**给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的 Windows 通知插件：按「这一轮为什么结束」区分提示音** —— 完成、被你中断、出错、额度耗尽各有各的声音，而不是把所有停止都报成「任务完成」。
 
-Pure PowerShell notification runner: **no .NET desktop runtime, no audio assets, no helper executable.** All six chimes are synthesized on the fly.
+纯 PowerShell 实现：**不需要 .NET 桌面运行时，不需要任何音频素材文件**，六种音色全部现场合成。
 
-<!-- Add a screenshot before publishing, e.g.:
-![Settings page](docs/assets/settings.png)
--->
+中文 | [English](README.en.md)
+
+![设置 → 通知](docs/assets/settings.png)
 
 ---
 
-## The problem
+## 解决的问题
 
-Every Windows notification plugin for DSH decides "done" from `agent/status → idle`. That is true when a turn finishes **and** when you press stop. So interrupting a task gives you a cheerful "task complete" toast.
+市面上给 DSH 做的 Windows 通知插件，判定「完成」用的都是 `agent/status → idle`。可这个条件在**任务正常跑完**时成立，在**你按下停止**时同样成立。所以你亲手中断一个任务，它会欢快地弹「任务完成」。
 
-The reason is already in the session log — DSH appends it itself:
+而真正的原因一直都记在会话日志里 —— DSH 自己写进去的：
 
 ```js
 this.session.append("turn/end", { turn, reason: turnEnds })
 ```
 
-`reason.kind` comes from `TurnEndReasonMap`, and a cancellation carries a nested cause:
+`reason.kind` 来自 `TurnEndReasonMap`，被取消时还带一层嵌套原因：
 
 ```ts
 type TurnEndReason     = 'completed' | 'aborted' | 'error' | 'max-tokens'
@@ -30,78 +30,80 @@ type AgentCancelCause   = { kind: 'user' } | { kind: 'parent' }
                         | { kind: 'hook'; reason: string } | { kind: 'disposed' }
 ```
 
-Pressing stop is `{ kind: 'aborted', reason: { kind: 'user' } }`. The information was always there; this plugin reads it.
+你按下停止就是 `{ kind: 'aborted', reason: { kind: 'user' } }`。信息一直在，只是没人接。本插件把它接上了。
 
-## Six situations, six chimes
+## 六种情形，六种提示音
 
-| Situation | Signal | Default chime | Sounds like |
+| 情形 | 判据 | 默认音色 | 听感 |
 |---|---|---|---|
-| Completed | `completed` | `completed` | D5→A5 rising pair |
-| **Interrupted** | `aborted` + `reason.kind === 'user'` | `interrupted` | A5→A4 falling, cut short |
-| Failed | `error` | `error` | low, dissonant, falling |
-| Output limit hit | `max-tokens` | `maxTokens` | three sharp pips |
-| Blocked | `blocked`, or `aborted` + `reason.kind === 'hook'` | `blocked` | flat double knock |
-| **Your input is needed** | `approval/asked`, `ask_user_question` | `attention` | E5-G5-B5 arpeggio |
+| 任务完成 | `completed` | `completed` | D5→A5 上行双音 |
+| **被中断** | `aborted` + `reason.kind === 'user'` | `interrupted` | A5→A4 下行短音 |
+| 出错 | `error` | `error` | 低沉不谐和音 |
+| 达到输出上限 | `max-tokens` | `maxTokens` | 三声急促高音 |
+| 被阻止 | `blocked`，或 `aborted` + `reason.kind === 'hook'` | `blocked` | 平音双击 |
+| **需要你操作** | `approval/asked`、`ask_user_question` | `attention` | E5-G5-B5 上行琶音 |
 
-`aborted` with `parent` (a delegating agent cancelled its child) or `disposed` (session teardown) stays **deliberately silent** — that is lifecycle noise, not news. `TurnEndReasonMap` is documented as merge-extensible by other packages, so an unrecognized `kind` is silent rather than guessed at.
+`aborted` 的另外两种原因 —— `parent`（父 agent 取消了子会话）和 `disposed`（会话销毁）—— **刻意静默**，那是生命周期噪音，不是你的事。`TurnEndReasonMap` 官方标注为可被其它包扩展，所以遇到不认识的 `kind` 一律静默，而不是瞎猜一个音。
 
-## Taskbar behaviour: the chat-app pattern
+## 任务栏：QQ/微信那套行为
 
-Flashes a few times to catch your eye, then **stops animating but leaves the taskbar button lit** until you come back — the same thing QQ and WeChat do.
+**先闪几下抓注意力，然后停动画但让任务栏图标保持高亮，直到你切回来。**
 
-| `flashAfter` | Behaviour |
+| `flashAfter` | 行为 |
 |---|---|
-| `holdUntilFocused` *(default)* | Flash 3×, then hold the attention highlight until focused |
-| `stop` | Flash 3× and stop |
-| `keepFlashing` | Animate until focused |
+| `holdUntilFocused`（默认） | 闪 3 次 → 保持高亮直到你点它 |
+| `stop` | 闪 3 次就结束 |
+| `keepFlashing` | 一直闪到你切回来 |
 
-Windows never flashes a foreground window, so none of this fires while you are already looking at DSH.
+Windows 从不闪前台窗口，所以你已经盯着 DSH 时这一套都不会触发。
 
-## Settings page
+## 设置页
 
-Registers a section into DSH's own Settings dialog (through the `settings.section` slot), not a bespoke popup:
+注册进 DSH **自己的设置对话框**（通过官方 `settings.section` 插槽），不是自建弹窗：
 
-- master switch · taskbar flash · toast — independent
-- flash count, pace, and what happens after the flash
-- **"stay quiet when the conversation on screen finishes"** — see below
-- volume
-- **per-situation enable + sound picker + preview button**
+![分场景提示音](docs/assets/settings-scenes.png)
 
-Every control persists immediately. No code editing, no restart.
+- 总开关 · 任务栏闪烁 · 系统通知弹窗 —— 三个独立开关
+- 闪烁次数、节奏、以及闪完之后的行为
+- 「正在看的那个会话跑完时不出声」—— 见下
+- 音量
+- **六种情形各自：开关 + 音效下拉 + ▶ 试听**
 
-### Quiet means *this* conversation, not *the window*
+每个改动即时落盘，不用改代码、不用重启。
 
-The rule is not "silence everything while the page is focused". The client reports which session the main view is showing, and the host silences a completion **only when the finishing session is the one you are reading**:
+### 「静默」指的是**你正在看的那个会话**，不是「页面在前台」
 
-| You are… | A turn finishes | Result |
+判据不是「只要页面在前台就全静默」。客户端会实时上报主视图正在显示哪个会话，宿主**只在这个完成的会话就是你正在读的那一个时**才静默：
+
+| 你的状态 | 哪个会话跑完 | 结果 |
 |---|---|---|
-| reading session A | session A | quiet |
-| reading session A | **session B** | **notifies** |
-| in the settings dialog | any session | **notifies** |
-| switched to another app | any session | notifies |
-| a question or approval arrives | — | always notifies |
+| 正在读会话 A | 会话 A | 安静 |
+| 正在读会话 A | **会话 B** | **提醒** |
+| 在设置页里调配置 | 任意会话 | **提醒** |
+| 切到别的程序 | 任意会话 | 提醒 |
+| 提问 / 审批到达 | — | 始终提醒 |
 
-A missed chime is worse than a redundant one, so the presence channel fails open: if the browser never reports, notifications fire.
+漏掉一次提示音比多响一次更糟，所以上报链路是**失效即放行**：浏览器从没上报过，通知照常响。
 
-## Install
+## 安装
 
-Requires Windows 10/11.
+需要 Windows 10/11。
 
-### Into a profile
+### 装进 profile
 
 ```powershell
-# 1. copy the plugin into your profile
+# 1. 把插件放进你的 profile
 $dest = Join-Path $env:USERPROFILE '.dsh\profiles\<profile>\node_modules\dsh-notify-cues'
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 Copy-Item package.json, cordis.patch.yml, lib -Destination $dest -Recurse -Force
 
-# 2. print the loader specifier for step 3
-#    `name` MUST be a file:// URL: the Cordis loader calls a bare import(name),
-#    and a filesystem path fails with ERR_UNSUPPORTED_ESM_URL_SCHEME.
+# 2. 打印第 3 步要用的加载说明符
+#    name 必须是 file:// URL：Cordis loader 把这个值交给裸 import(name)，
+#    传文件系统路径会失败（ERR_UNSUPPORTED_ESM_URL_SCHEME）。
 node -e "console.log(require('node:url').pathToFileURL(process.argv[1]).href)" "$dest\lib\index.js"
 ```
 
-Append to `~/.dsh/profiles/<profile>/cordis.patch.yml`, substituting the URL printed above:
+把下面这段追加到 `~/.dsh/profiles/<profile>/cordis.patch.yml`，`name` 用上一步打印出来的 URL：
 
 ```yaml
 - insert:
@@ -112,110 +114,111 @@ Append to `~/.dsh/profiles/<profile>/cordis.patch.yml`, substituting the URL pri
         notifications: true
 ```
 
-Then **fully restart** DeepSeek Harness and open **Settings → Notifications**.
+然后**完整重启** DeepSeek Harness，打开 **设置 → 通知**。
 
-### Local development mount
+### 本地开发挂载
 
-If your profile is not owned by the desktop application, you can mount a checkout directly and get hot reload:
+如果你的 profile 不是桌面应用独占的，可以直接挂载 checkout 并享受热重载：
 
 ```powershell
-dsh --profile <name> --patch /path/to/dev.patch.yml web
+dsh --profile <profile> --patch /path/to/dev.patch.yml web
 ```
 
-`dev.patch.yml` ships with a `REPLACE/WITH` placeholder for `name`. A profile the desktop app owns is refused with `profile "X" is managed exclusively by the Electron application` — install into it instead.
+`dev.patch.yml` 里的 `name` 是 `REPLACE/WITH` 占位符，需要先填。被桌面应用独占的 profile 会被拒绝启动（`profile "X" is managed exclusively by the Electron application`），那种情况请走上面的安装方式。
 
-## Configuration
+## 配置
 
-`~/.dsh/dsh-notify-cues.json`, edited through the settings page or by hand. Re-read on every notification, so a hand edit takes effect immediately.
+配置文件在 `~/.dsh/dsh-notify-cues.json`，可以在设置页改，也可以手改。**每次通知都重新读取**，所以手改立刻生效。
 
-| Field | Default | Meaning |
+| 字段 | 默认 | 含义 |
 |---|---|---|
-| `notifications` | `true` | Master switch: no sound, no toast, no flash |
-| `flash` | `true` | Taskbar flash |
-| `flashCount` | `3` | Opening burst length |
-| `flashTimeout` | `500` | Milliseconds per pulse |
+| `notifications` | `true` | 总开关：不出声、不弹通知、不闪任务栏 |
+| `flash` | `true` | 任务栏闪烁 |
+| `flashCount` | `3` | 开场闪几次 |
+| `flashTimeout` | `500` | 每闪一下的间隔毫秒数 |
 | `flashAfter` | `holdUntilFocused` | `stop` · `holdUntilFocused` · `keepFlashing` |
-| `toast` | `true` | System notification popup |
-| `volume` | `1` | Chime volume, 0.1–1.0 |
-| `quietOnForeground` | `true` | Quiet only for the conversation you are reading |
-| `alwaysNotifyAttention` | `true` | Questions and approvals ignore the rule above |
-| `dedupMs` | `1500` | Repeat-notice window, scoped per (session, situation) |
-| `per.<situation>.enabled` | `true` | Switch for one situation |
-| `per.<situation>.toast` | `true` | Toast for one situation |
-| `per.<situation>.sound` | situation name | Tone name, `ding`, `none`, or a `.wav` path |
+| `toast` | `true` | 系统通知弹窗 |
+| `volume` | `1` | 提示音音量，0.1–1.0 |
+| `quietOnForeground` | `true` | 只静默你正在读的那一个会话 |
+| `alwaysNotifyAttention` | `true` | 提问与审批不受上面那条限制 |
+| `dedupMs` | `1500` | 同情形去重窗口 |
+| `per.<情形>.enabled` | `true` | 单个情形开关 |
+| `per.<情形>.toast` | `true` | 单个情形是否弹通知 |
+| `per.<情形>.sound` | 同情形名 | 音色名、`ding`、`none`，或 `.wav` 路径 |
 
-Situation keys: `completed`, `interrupted`, `error`, `max-tokens`, `blocked`, `attention`.
+情形键名：`completed`、`interrupted`、`error`、`max-tokens`、`blocked`、`attention`。
 
-### HTTP API
+### HTTP 接口
 
-Same-origin only (`Sec-Fetch-Site` checked; cross-site gets 403).
+仅接受同源请求（校验 `Sec-Fetch-Site`，跨站返回 403）。
 
-| Endpoint | Method | Purpose |
+| 端点 | 方法 | 用途 |
 |---|---|---|
-| `/dsh-notify-cues/config` | GET/POST | Read / merge-patch the config |
-| `/dsh-notify-cues/presence` | GET/POST | Browser presence: `{visible, focused, viewedSessionId}` |
-| `/dsh-notify-cues/test?scene=<name>` | GET | Fire a real notification now |
-| `/dsh-notify-cues/keys` | GET | Situation and tone names |
+| `/dsh-notify-cues/config` | GET/POST | 读取 / 局部更新配置 |
+| `/dsh-notify-cues/presence` | GET/POST | 浏览器状态：`{visible, focused, viewedSessionId}` |
+| `/dsh-notify-cues/test?scene=<情形>` | GET | 立刻发一条该情形的真实通知 |
+| `/dsh-notify-cues/keys` | GET | 情形名与音色名清单 |
 
-## Two deliberate design decisions
+## 两个刻意的设计决定
 
-**The debounce is scoped per (session, situation), not per session.** The first implementation used a session-wide window; a test immediately caught a real bug — an approval prompt followed by a failure would swallow the failure notice. Only a *repeated notice of the same situation* is suppressed now.
+**去重按 (会话, 情形) 计时，不按会话。** 早期实现用的是会话级窗口，测试立刻抓到一个真 bug —— 审批提示之后紧接着报错，错误通知会被 1.5 秒窗口吞掉，**真实故障被静默**。现在只有「同一情形的重复触发」会被压掉。
 
-**An answered question suppresses the following "completed" chime, but never a failure or an interruption.** Answering resumes the turn, which then ends as `completed`; chiming "done" right after you clicked is pure noise. If that turn instead fails or is interrupted, that is real news and still fires.
+**回答完问题后抑制紧随其后的「完成」音，但绝不影响出错和中断。** 你回答提问后回合恢复，最终以 `completed` 结束；你刚点完就叮一声「完成」是纯噪音。但如果那一轮接下来报错或被中断，那是真新闻，照响。
 
-## Testing
+## 测试
 
 ```powershell
-node test/run.mjs                              # logic suite
-node test/client-contract.mjs lib/client.js    # browser bundle contract
-node test/manifest.mjs package.json            # manifest vs installed harness
+node test/run.mjs                              # 逻辑单测
+node test/client-contract.mjs lib/client.js    # 浏览器 bundle 契约
+node test/manifest.mjs package.json            # manifest 对已装 harness
 node test/patch-shape.mjs cordis.patch.yml dev.patch.yml
 node test/patch-loadable.mjs dev.patch.yml
-node test/sim-append.mjs                       # profile patch stays valid
+node test/sim-append.mjs                       # profile 补丁仍合法
 ```
 
-`test/run.mjs` is a small in-process runner rather than `node --test`: the DSH file sandbox forbids named pipes, and the built-in runner spawns its child over one.
+`test/run.mjs` 是自建的进程内 runner，不用 `node --test`：DSH 的文件沙箱禁止命名管道，而内置 runner 正是用管道 spawn 子进程的。
 
-Checks that need a local harness install (its `app.asar`) report `skipped` instead of failing when it is absent. Point them at a different install with `DSH_ASAR=/path/to/app.asar`.
+依赖本机 harness 安装（`app.asar`）的检查，在没有安装时会报 `skipped` 而不是失败。用 `DSH_ASAR=/path/to/app.asar` 可以指向别处的安装。
 
-The pure-logic suite covers the situation mapping (all five abort causes), the gating rules, config round-tripping, argument construction, and end-to-end dispatch through a fake plugin context — including several cases that pin "an interruption must never report as completed".
+逻辑套件覆盖：情形映射（取消原因的全部五个成员）、门控规则、配置读写、参数构造，以及通过假 ctx 的端到端分发 —— 其中有若干条专门钉住「中断绝不能报成完成」。
 
-## Known limitations
+## 已知限制
 
-- **Windows only.** The notifier drives WinRT toasts and `FlashWindowEx`.
-- **The first toast registers an AppUserModelID.** An unpackaged process has no package identity, so Windows drops toasts (`0x80073D54`) until the AUMID key and a Start Menu shortcut exist. The plugin creates a dedicated `DeepSeek Harness Notifications.lnk` — deliberately *not* `DeepSeek Harness.lnk`, which belongs to the desktop client installer.
-- **No in-toast answering.** `ask_user_question` gets a normal toast plus flash; you answer in the DSH UI. The interactive dropdown is what forces a .NET dependency, which this plugin avoids on purpose.
-- The taskbar "hold" highlight relies on `FLASHW_TIMERNOFG` without the animation flag. Windows 11 no longer exposes the old `WS_EX_FLASHING` bit, so this cannot be asserted programmatically — it was confirmed by eye on one machine. If it does not hold for you, use `keepFlashing` or `stop`.
-- Developed against DSH `0.2.0-rc.2`. An older plugin in this ecosystem notes that `0.1.0-rc.6` emits no `turn/end` at all; on such a version only the foreground heuristics would work.
+- **仅 Windows。** 通知器调用 WinRT toast 和 `FlashWindowEx`。
+- **第一次弹 toast 会注册 AppUserModelID。** 非打包进程没有 package identity，Windows 会直接丢弃 toast（`0x80073D54`），必须先有 AUMID 注册表项和开始菜单快捷方式。插件会建一个专用的 `DeepSeek Harness Notifications.lnk` —— 刻意**不叫** `DeepSeek Harness.lnk`，那个属于桌面客户端安装程序。
+- **通知里不能直接作答。** `ask_user_question` 只弹普通 toast 加闪烁，回答仍在 DSH 界面里完成。那个交互式下拉菜单正是需要 .NET 的部分，本插件刻意避开。
+- 任务栏「保持高亮」依赖不带动画标志的 `FLASHW_TIMERNOFG`。Windows 11 不再暴露旧的 `WS_EX_FLASHING` 位，所以这一点无法程序化断言，是在一台机器上肉眼确认的。如果你的机器上并不保持，改用 `keepFlashing` 或 `stop`。
+- 开发针对 DSH `0.2.0-rc.2`。同生态的一个更早的插件提到 `0.1.0-rc.6` 根本不发 `turn/end`，在那个版本上只有前台启发式规则能工作。
 
-## Repository layout
+## 目录结构
 
 ```
 dsh-notify-cues/
 ├── lib/
-│   ├── index.js          # host: turn/end mapping, gating, config + presence API
-│   ├── client.js         # browser: settings section + presence reporter
-│   └── notify.ps1        # tone synthesis, WinRT toast, taskbar flash
-├── cordis.patch.yml      # bundle patch for package installs
-├── dev.patch.yml         # hot-reload overlay (fill in the name: placeholder)
+│   ├── index.js          # 宿主：turn/end 判定、门控、配置与状态上报 API
+│   ├── client.js         # 浏览器：设置分区 + 状态上报
+│   └── notify.ps1        # 音色合成、WinRT toast、任务栏闪烁
+├── cordis.patch.yml      # 作为包安装时的 bundle 补丁
+├── dev.patch.yml         # 热重载挂载（需填 name 占位符）
 ├── docs/
-│   ├── DSH-API-CONTRACTS.md  # verified DSH 0.2.0-rc.2 plugin contracts
-│   ├── asar.cjs              # helper for reading app.asar
-│   └── probe-asar.mjs        # in-memory full-text search over app.asar
-└── test/                 # see Testing
+│   ├── DSH-API-CONTRACTS.md  # 已核实的 DSH 0.2.0-rc.2 插件契约
+│   ├── assets/               # README 截图
+│   ├── asar.cjs              # 读取 app.asar 的辅助工具
+│   └── probe-asar.mjs        # 对 app.asar 的内存全文检索
+└── test/                 # 见「测试」
 ```
 
-`docs/DSH-API-CONTRACTS.md` is a line-cited reference for the contracts this plugin depends on: the `session/event` listener signature, the full `turn/end` type tree, the slot API (which `kind` requires which option, and how `inject` becomes props), the `webServer` route contract, and the host plugin export shape. Handy when extending it.
+`docs/DSH-API-CONTRACTS.md` 是一份**逐条带行号引用**的契约参考，覆盖本插件依赖的每一个接口：`session/event` 回调签名、`turn/end` 完整类型树、插槽 API（哪种 `kind` 需要哪个必填项、`inject` 如何变成 props）、`webServer` 路由契约、宿主插件导出形态。想扩展这个插件时比重新反查省事得多。
 
-## Credits
+## 致谢
 
-Built after reading two plugins in the same ecosystem, both of which had already solved problems this one had to solve:
+写这个插件之前读了同生态的两个插件，它们各自已经解决过本插件必须解决的一些问题：
 
-- [**dsh-notify-win**](https://github.com/Andyqwe44/dsh-notify-win) — WinRT toast construction, the AppUserModelID self-registration dance (and why the shortcut name must not collide with the installer's), and the `EnumWindows` + `FlashWindowEx` approach.
-- [**aokamoaki/dsh-notify**](https://github.com/aokamoaki/dsh-notify) — per-situation sound types, and the insight that "input needed" notices must bypass foreground suppression.
+- [**dsh-notify-win**](https://github.com/Andyqwe44/dsh-notify-win) —— WinRT toast 的构造方式、AppUserModelID 自注册那一套（以及为什么快捷方式名字不能和安装程序的撞车）、`EnumWindows` + `FlashWindowEx` 的用法。
+- [**aokamoaki/dsh-notify**](https://github.com/aokamoaki/dsh-notify) —— 分场景音型的设计，以及「需要你操作」必须绕过前台静默这个判断。
 
-Neither is a dependency and no code was copied; their sources and READMEs were read as prior art.
+两者都不是依赖，也没有复制代码；是作为先行者参考了源码与文档。
 
-## License
+## 许可
 
-MIT — see [LICENSE](LICENSE).
+MIT，见 [LICENSE](LICENSE)。
