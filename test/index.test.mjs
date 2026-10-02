@@ -19,13 +19,17 @@ import { pathToFileURL } from 'node:url'
 // call, so setting the variable here is enough.
 const TEST_HOME = mkdtempSync(join(tmpdir(), 'dsh-notify-cues-test-'))
 process.env.DSH_HOME = TEST_HOME
+// Pin the notification language. Otherwise the copy is derived from the host
+// locale: this suite passed on a zh-CN machine and failed on an en-US CI runner,
+// because one assertion matched Chinese toast text.
+process.env.DSH_NOTIFY_CUES_LANG = 'zh'
 
 const mod = await import(new URL('../lib/index.js', import.meta.url).href)
 void pathToFileURL
 const {
   sceneForTurnEnd, decideNotify, mergeConfig, buildNotifyArgs,
   DEFAULT_CONFIG, SCENES, configPath, loadConfig, saveConfig,
-  formatElapsed, apply, __resetForTests, __setForegroundForTests,
+  formatElapsed, systemLang, titleBodyFor, apply, __resetForTests, __setForegroundForTests,
 } = mod
 
 process.on('exit', () => { rmSync(TEST_HOME, { recursive: true, force: true }) })
@@ -219,8 +223,7 @@ test('silentScenes suppresses exactly the named scene', () => {
   assert.equal(decideNotify(cfg, 'interrupted', { silentScenes: ['completed'] }).action, 'notify')
 })
 
-test('an unknown scene is refused rather than notified', () => {
-  assert.deepEqual(decideNotify(quiet(), 'bogus'), { action: 'skip', reason: 'unknown-scene' })
+test('an unknown scene is refused rather than notified', () => {  assert.deepEqual(decideNotify(quiet(), 'bogus'), { action: 'skip', reason: 'unknown-scene' })
 })
 
 // ---------------------------------------------------------------------------
@@ -354,6 +357,29 @@ test('formatElapsed reads naturally in both languages', () => {
   assert.equal(formatElapsed(134000, 'zh'), '2 分 14 秒')
 })
 
+test('every scene has distinct, non-empty copy in BOTH languages', () => {
+  // Guards against a half-translated dictionary and against two scenes sharing
+  // a title (which would make them indistinguishable in the notification).
+  for (const lang of ['zh', 'en']) {
+    const titles = SCENES.map((scene) => {
+      const copy = titleBodyFor(scene, lang)
+      assert.equal(typeof copy.title, 'string', `${scene} title missing in ${lang}`)
+      assert.ok(copy.title.length > 0, `${scene} title empty in ${lang}`)
+      assert.ok(copy.body.length > 0, `${scene} body empty in ${lang}`)
+      return copy.title
+    })
+    assert.equal(new Set(titles).size, SCENES.length, `${lang} titles must all differ: ${titles.join(' / ')}`)
+  }
+})
+
+test('the language follows the environment override', () => {
+  // The suite pins DSH_NOTIFY_CUES_LANG=zh so it does not depend on the host
+  // locale; this asserts the override is what actually drives the copy.
+  assert.equal(systemLang(), 'zh')
+  assert.equal(titleBodyFor('completed').title, titleBodyFor('completed', 'zh').title)
+  assert.notEqual(titleBodyFor('completed', 'zh').title, titleBodyFor('completed', 'en').title)
+})
+
 // ---------------------------------------------------------------------------
 // End-to-end dispatch through a fake ctx
 // ---------------------------------------------------------------------------
@@ -413,7 +439,13 @@ test('a user cancellation notifies as interrupted, never as completed', () => {
   assert.equal(h.spawned.length, 1)
   const argv = h.spawned[0].argv
   assert.equal(argv[argv.indexOf('-Scene') + 1], 'interrupted')
-  assert.ok(argv[argv.indexOf('-Title') + 1].includes('中断'), 'the toast must not claim completion')
+  // Compare against the copy the plugin is configured to emit rather than a
+  // hardcoded string: the old assertion matched '中断', which made the suite
+  // depend on the host locale (green on zh-CN, red on an en-US CI runner).
+  const expected = titleBodyFor('interrupted', systemLang())
+  assert.equal(argv[argv.indexOf('-Title') + 1], expected.title)
+  assert.notEqual(expected.title, titleBodyFor('completed', systemLang()).title,
+    'an interruption must not reuse the completed copy')
 })
 
 test('the same turn never notifies twice', () => {

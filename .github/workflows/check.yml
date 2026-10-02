@@ -13,9 +13,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+      # Deliberately no setup-node: the runner's bundled Node is used as-is.
+      # Pinning a version here once made CI differ from local development, and
+      # that difference is exactly what hid a locale-dependent test failure.
+      # The plugin needs Node >= 20; the runner ships newer.
 
       # Pure-logic suite: no harness, no Windows APIs, no spawn.
       - name: Unit tests
